@@ -27,4 +27,12 @@ make
 ## Práctica 3 — Fichero proyectado en memoria
 - Nuevo programa `bot` que mueve la raqueta 1 automáticamente.
 - Comparten la clase `DatosMemCompartida` (esfera, raqueta1 y acción) mediante el fichero `/tmp/datos_bot` proyectado con `mmap`.
-- Orden de ejecución: `./logger`, `./tenis` y después `./bot`.
+- Orden de ejecución (hasta la práctica 3): `./logger`, `./tenis` y después `./bot`.
+
+## Práctica 4 — Cliente/servidor con FIFOs e hilos
+- El juego se separa en dos programas: `servidor` (calcula el juego) y `cliente` (dibuja y lee el teclado).
+  `Mundo.cpp`/`tenis.cpp` se sustituyen por `MundoServidor.cpp`, `MundoCliente.cpp`, `servidor.cpp` y `cliente.cpp`.
+- FIFO `/tmp/FIFO_coordenadas` (servidor → cliente): en cada `OnTimer` el servidor envía con `sprintf` la posición de la pelota, de las raquetas y los puntos; el cliente la lee con `sscanf`.
+- FIFO `/tmp/FIFO_teclas` (cliente → servidor): el cliente envía cada tecla en `OnKeyboardDown`; en el servidor la recibe un hilo (`pthread_create` + `RecibeComandosJugador`) para no bloquear el juego.
+- El `logger` sigue conectado al servidor y el `bot` al cliente.
+- Orden de ejecución: `./logger`, `./servidor`, `./cliente` y después `./bot`.

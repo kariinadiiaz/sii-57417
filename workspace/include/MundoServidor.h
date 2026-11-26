@@ -1,11 +1,12 @@
-// Mundo.h: interface for the CMundo class.
+// MundoServidor.h: CMundo del programa servidor (Práctica 4)
 //
 //////////////////////////////////////////////////////////////////////
 
-#if !defined(AFX_MUNDO_H__9510340A_3D75_485F_93DC_302A43B8039A__INCLUDED_)
-#define AFX_MUNDO_H__9510340A_3D75_485F_93DC_302A43B8039A__INCLUDED_
+#if !defined(MUNDOSERVIDOR_H)
+#define MUNDOSERVIDOR_H
 
 #include <vector>
+#include <pthread.h>
 #include "Plano.h"
 
 #if _MSC_VER > 1000
@@ -14,7 +15,7 @@
 
 #include "Esfera.h"
 #include "Raqueta.h"
-#include "DatosMemCompartida.h"
+
 
 class CMundo  
 {
@@ -38,11 +39,15 @@ public:
 	int puntos1;
 	int puntos2;
 
-	// Práctica 2: tubería (FIFO) hacia el logger
+	// P2: tuberia (FIFO) hacia el logger
 	int fd_logger;
 
-	// Práctica 3: memoria compartida con el bot
-	DatosMemCompartida* pdatos;
+	// P4: tuberia servidor -> cliente (coordenadas)
+	int fd_coordenadas;
+	// P4: tuberia cliente -> servidor (teclas), la lee un hilo
+	int fd_teclas;
+	pthread_t thid1;
+	void RecibeComandosJugador();
 };
 
-#endif // !defined(AFX_MUNDO_H__9510340A_3D75_485F_93DC_302A43B8039A__INCLUDED_)
+#endif // !defined(MUNDOSERVIDOR_H)

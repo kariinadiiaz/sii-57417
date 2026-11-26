@@ -1,9 +1,11 @@
 
-// Mundo.cpp: implementation of the CMundo class.
+// MundoCliente.cpp: CMundo del cliente (Práctica 4)
+// No calcula el juego: recibe las coordenadas del servidor, las dibuja,
+// manda las teclas al servidor y comparte datos con el bot.
 //
 //////////////////////////////////////////////////////////////////////
 #include <fstream>
-#include "Mundo.h"
+#include "MundoCliente.h"
 #include "glut.h"
 
 #include <stdlib.h>
@@ -11,16 +13,17 @@
 #include <string.h>
 #include <math.h>
 
-// Práctica 2 (FIFO) y Práctica 3 (fichero proyectado en memoria)
+// Práctica 3 (fichero proyectado, bot) y Práctica 4 (FIFOs con el servidor)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <signal.h>
 
-#define FIFO_LOGGER "/tmp/FIFO_logger"
 #define FICHERO_BOT "/tmp/datos_bot"
-#define PUNTOS_FIN  3
+#define FIFO_COORDENADAS "/tmp/FIFO_coordenadas"
+#define FIFO_TECLAS      "/tmp/FIFO_teclas"
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -33,8 +36,11 @@ CMundo::CMundo()
 
 CMundo::~CMundo()
 {
-	// P2: cerrar la tuberia hacia el logger
-	close(fd_logger);
+	// P4: cerrar la tuberia de coordenadas (la destruye el servidor)
+	close(fd_coordenadas);
+	// P4: cerrar y destruir la tuberia de teclas (la creo yo)
+	close(fd_teclas);
+	unlink(FIFO_TECLAS);
 	// P3: deshacer la proyeccion en memoria
 	munmap(pdatos, sizeof(DatosMemCompartida));
 }
@@ -129,71 +135,34 @@ void CMundo::OnDraw()
 }
 
 void CMundo::OnTimer(int value)
-{	
+{
+	// P4: leer las coordenadas que manda el servidor
+	char cad[200];
+	if (read(fd_coordenadas, cad, sizeof(cad)) <= 0)
+	{
+		exit(0);	// el servidor ha terminado (fin de partida)
+	}
+	// P4: actualizar los atributos con los datos recibidos
+	sscanf(cad, "%f %f %f %f %f %f %f %f %f %f %d %d",
+		&esfera.centro.x, &esfera.centro.y,
+		&jugador1.x1, &jugador1.y1, &jugador1.x2, &jugador1.y2,
+		&jugador2.x1, &jugador2.y1, &jugador2.x2, &jugador2.y2,
+		&puntos1, &puntos2);
+
 	// P3: pasar al bot la posicion de la esfera y la raqueta1
 	pdatos->esfera = esfera;
 	pdatos->raqueta1 = jugador1;
-	// P3: aplicar la accion que ha decidido el bot
+	// P3: aplicar la accion del bot (se envia al servidor como una tecla)
 	if (pdatos->accion == 1) OnKeyboardDown('w', 0, 0);
 	else if (pdatos->accion == -1) OnKeyboardDown('s', 0, 0);
-	else jugador1.velocidad.y = 0;
-
-	jugador1.Mueve(0.025f);
-	jugador2.Mueve(0.025f);
-	esfera.Mueve(0.025f);
-	int i;
-	for(i=0;i<paredes.size();i++)
-	{
-		paredes[i].Rebota(esfera);
-		paredes[i].Rebota(jugador1);
-		paredes[i].Rebota(jugador2);
-	}
-
-	jugador1.Rebota(esfera);
-	jugador2.Rebota(esfera);
-	if(fondo_izq.Rebota(esfera))
-	{
-		esfera.centro.x=0;
-		esfera.centro.y=rand()/(float)RAND_MAX;
-		esfera.velocidad.x=2+2*rand()/(float)RAND_MAX;
-		esfera.velocidad.y=2+2*rand()/(float)RAND_MAX;
-		puntos2++;
-		// P2: avisar al logger
-		char cad[200];
-		sprintf(cad, "Jugador 2 marca 1 punto, lleva un total de %d puntos.", puntos2);
-		write(fd_logger, cad, strlen(cad) + 1);
-	}
-
-	if(fondo_dcho.Rebota(esfera))
-	{
-		esfera.centro.x=0;
-		esfera.centro.y=rand()/(float)RAND_MAX;
-		esfera.velocidad.x=-2-2*rand()/(float)RAND_MAX;
-		esfera.velocidad.y=-2-2*rand()/(float)RAND_MAX;
-		puntos1++;
-		// P2: avisar al logger
-		char cad[200];
-		sprintf(cad, "Jugador 1 marca 1 punto, lleva un total de %d puntos.", puntos1);
-		write(fd_logger, cad, strlen(cad) + 1);
-	}
-
-	// P2 (ejercicio propuesto): fin de la partida a los 3 puntos
-	if (puntos1 >= PUNTOS_FIN || puntos2 >= PUNTOS_FIN)
-	{
-		exit(0);	// llama al destructor de mundo -> cierra la FIFO -> el logger termina
-	}
-
 }
 
 void CMundo::OnKeyboardDown(unsigned char key, int x, int y)
 {
-	switch(key)
-	{
-	case 's':jugador1.velocidad.y=-4;break;
-	case 'w':jugador1.velocidad.y=4;break;
-	case 'l':jugador2.velocidad.y=-4;break;
-	case 'o':jugador2.velocidad.y=4;break;
-	}
+	// P4: enviar la tecla al servidor
+	char cad[100];
+	sprintf(cad, "%c", key);
+	write(fd_teclas, cad, strlen(cad) + 1);
 }
 
 void CMundo::Init()
@@ -201,10 +170,22 @@ void CMundo::Init()
 	puntos1=0;
 	puntos2=0;
 
-	// P2: abrir la FIFO en escritura (la crea el logger, que se lanza antes)
-	fd_logger = open(FIFO_LOGGER, O_WRONLY);
-	if (fd_logger < 0) {
-		perror("No se puede abrir la FIFO del logger");
+	// si el servidor se cierra, que write() no mate al cliente sin limpiar
+	signal(SIGPIPE, SIG_IGN);
+
+	// P4: abrir en lectura la tuberia de coordenadas (la crea el servidor)
+	fd_coordenadas = open(FIFO_COORDENADAS, O_RDONLY);
+	if (fd_coordenadas < 0) {
+		perror("No se puede abrir la FIFO de coordenadas (¿has lanzado el servidor?)");
+		exit(1);
+	}
+
+	// P4: crear la tuberia de teclas y abrirla en escritura
+	unlink(FIFO_TECLAS);
+	mkfifo(FIFO_TECLAS, 0600);
+	fd_teclas = open(FIFO_TECLAS, O_WRONLY);
+	if (fd_teclas < 0) {
+		perror("No se puede abrir la FIFO de teclas");
 		exit(1);
 	}
 
