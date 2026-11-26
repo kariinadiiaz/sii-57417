@@ -11,14 +11,16 @@
 #include <string.h>
 #include <math.h>
 
-// Librerías añadidas para Memoria Compartida (Práctica 3)
+// Práctica 2 (FIFO) y Práctica 3 (fichero proyectado en memoria)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include "DatosMemCompartida.h"
 
-#define SHM_NAME "/shm_tenis"
+#define FIFO_LOGGER "/tmp/FIFO_logger"
+#define FICHERO_BOT "/tmp/datos_bot"
+#define PUNTOS_FIN  3
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -31,9 +33,10 @@ CMundo::CMundo()
 
 CMundo::~CMundo()
 {
-	if (shm_datos != nullptr) {
-		munmap(shm_datos, sizeof(DatosMemCompartida));
-	}
+	// P2: cerrar la tuberia hacia el logger
+	close(fd_logger);
+	// P3: deshacer la proyeccion en memoria
+	munmap(pdatos, sizeof(DatosMemCompartida));
 }
 
 void CMundo::InitGL()
@@ -127,19 +130,13 @@ void CMundo::OnDraw()
 
 void CMundo::OnTimer(int value)
 {	
-	// Actualizar datos compartidos para el bot y procesar su acción
-	if (shm_datos != nullptr) {
-		shm_datos->esfera = esfera;
-		shm_datos->raqueta1 = jugador1;
-
-		if (shm_datos->accion == 1) {
-			OnKeyboardDown('w', 0, 0);
-		} else if (shm_datos->accion == -1) {
-			OnKeyboardDown('s', 0, 0);
-		} else {
-			jugador1.velocidad.y = 0;
-		}
-	}
+	// P3: pasar al bot la posicion de la esfera y la raqueta1
+	pdatos->esfera = esfera;
+	pdatos->raqueta1 = jugador1;
+	// P3: aplicar la accion que ha decidido el bot
+	if (pdatos->accion == 1) OnKeyboardDown('w', 0, 0);
+	else if (pdatos->accion == -1) OnKeyboardDown('s', 0, 0);
+	else jugador1.velocidad.y = 0;
 
 	jugador1.Mueve(0.025f);
 	jugador2.Mueve(0.025f);
@@ -161,6 +158,10 @@ void CMundo::OnTimer(int value)
 		esfera.velocidad.x=2+2*rand()/(float)RAND_MAX;
 		esfera.velocidad.y=2+2*rand()/(float)RAND_MAX;
 		puntos2++;
+		// P2: avisar al logger
+		char cad[200];
+		sprintf(cad, "Jugador 2 marca 1 punto, lleva un total de %d puntos.", puntos2);
+		write(fd_logger, cad, strlen(cad) + 1);
 	}
 
 	if(fondo_dcho.Rebota(esfera))
@@ -170,6 +171,16 @@ void CMundo::OnTimer(int value)
 		esfera.velocidad.x=-2-2*rand()/(float)RAND_MAX;
 		esfera.velocidad.y=-2-2*rand()/(float)RAND_MAX;
 		puntos1++;
+		// P2: avisar al logger
+		char cad[200];
+		sprintf(cad, "Jugador 1 marca 1 punto, lleva un total de %d puntos.", puntos1);
+		write(fd_logger, cad, strlen(cad) + 1);
+	}
+
+	// P2 (ejercicio propuesto): fin de la partida a los 3 puntos
+	if (puntos1 >= PUNTOS_FIN || puntos2 >= PUNTOS_FIN)
+	{
+		exit(0);	// llama al destructor de mundo -> cierra la FIFO -> el logger termina
 	}
 
 }
@@ -190,26 +201,31 @@ void CMundo::Init()
 	puntos1=0;
 	puntos2=0;
 
-	// Inicialización y configuración del fichero proyectado en memoria
-	shm_unlink(SHM_NAME);
-	shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-	if (shm_fd == -1) {
-		perror("Error al crear shm");
-	}
-	
-	if (ftruncate(shm_fd, sizeof(DatosMemCompartida)) == -1) {
-		perror("Error en ftruncate");
+	// P2: abrir la FIFO en escritura (la crea el logger, que se lanza antes)
+	fd_logger = open(FIFO_LOGGER, O_WRONLY);
+	if (fd_logger < 0) {
+		perror("No se puede abrir la FIFO del logger");
+		exit(1);
 	}
 
-	char* direccion = (char*)mmap(NULL, sizeof(DatosMemCompartida), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+	// P3: crear el fichero del tamaño de DatosMemCompartida (open + ftruncate)
+	int fd = open(FICHERO_BOT, O_RDWR | O_CREAT | O_TRUNC, 0666);
+	if (fd < 0) {
+		perror("No se puede crear el fichero del bot");
+		exit(1);
+	}
+	ftruncate(fd, sizeof(DatosMemCompartida));
+	// P3: proyectarlo en memoria
+	char* direccion = (char*)mmap(NULL, sizeof(DatosMemCompartida),
+	                              PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (direccion == MAP_FAILED) {
 		perror("Error en mmap");
+		exit(1);
 	}
-
-	close(shm_fd);
-
-	shm_datos = (DatosMemCompartida*)direccion;
-	shm_datos->accion = 0;
+	// P3: cerrar el descriptor y guardar la direccion
+	close(fd);
+	pdatos = (DatosMemCompartida*)direccion;
+	pdatos->accion = 0;
 
 	Plano p;
 	//pared inferior

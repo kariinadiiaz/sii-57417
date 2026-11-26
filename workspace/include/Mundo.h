@@ -14,16 +14,10 @@
 
 #include "Esfera.h"
 #include "Raqueta.h"
-
 #include "DatosMemCompartida.h"
-
-// Dentro de class CMundo:
 
 class CMundo  
 {
-private:
-    DatosMemCompartida* shm_datos;
-    int shm_fd;
 public:
 	void Init();
 	CMundo();
@@ -43,6 +37,12 @@ public:
 
 	int puntos1;
 	int puntos2;
+
+	// Práctica 2: tubería (FIFO) hacia el logger
+	int fd_logger;
+
+	// Práctica 3: memoria compartida con el bot
+	DatosMemCompartida* pdatos;
 };
 
 #endif // !defined(AFX_MUNDO_H__9510340A_3D75_485F_93DC_302A43B8039A__INCLUDED_)
